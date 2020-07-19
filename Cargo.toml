@@ -1,0 +1,10 @@
+[package]
+name = "srb2launcher_r"
+version = "0.1.0"
+authors = ["516M <thingstuffet@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+scraper = "0.12.0"
+reqwest = { version = "0.10", features = ["blocking", "json"] }
+crossterm = "0.17.7"

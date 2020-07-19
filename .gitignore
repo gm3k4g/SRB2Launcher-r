@@ -1,0 +1,5 @@
+# ignore target directory
+/target
+
+# ignore the created list file
+srb2l-r_list.txt
