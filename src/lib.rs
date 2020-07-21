@@ -8,6 +8,7 @@ use std::io::Read;
 
 const FILENAME: &str = "srb2l-r_list.txt";
 
+// TODO: Creation of structs for better manipulation/cleaner code
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 	// IP address to connect to
 	let mut ip = Some(std::string::String::new());
@@ -43,16 +44,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 	// Input variable
 	let mut input: std::string::String = std::string::String::new();
 
-	// TODO: set option to allow immediately displaying servers upon startup?
-
-	// starting message: clear terminal and show this
+	// TODO: create option to allow immediately displaying servers upon startup?
 	println!("{}[2J", 27 as char);
 	println!("========================== SRB2 LAUNCHER-r =====================");
 	if firsttime {
 		println!("NOTICE: If this is your first time using SRB2 Launcher-r, type \"help\" without\n the quotation marks for more details. This message will not appear again.");
-		// disable firsttime
-		firsttime = false;
-		// write variable in the .txt file to make program remember
+		firsttime = false; // TODO: write variable in the .txt file to make program remember
+		
 	}
 
 	// start loop
