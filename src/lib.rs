@@ -1,12 +1,95 @@
 // lib -- core logic of program
-
-use std::fs::OpenOptions;
-use std::process::Command;
-
 use std::io::Write;
-use std::io::Read;
+use std::process::Command;
+use std::collections::HashMap;
+use std::time::Duration;
+use std::fs::OpenOptions;
+
+use reqwest::ClientBuilder;
+use std::error::Error;
+
+use tokio::task;
 
 const FILENAME: &str = "srb2l-r_list.txt";
+
+pub struct Server {
+   pub ip: std::string::String,
+   pub port: std::string::String, //TODO: maybe integer?
+   pub name: std::string::String,
+   pub version: std::string::String,
+   pub selection: u8 // Number selection corresponding to the server
+   // TODO: implement the following (create ASKINFO packet for these?)
+   //gametype:
+   //capacity:
+   //files:
+   //ping:
+}
+impl std::fmt::Display for Server {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(f, "Name: {}, Version: {}\n    IP Address: {}:{}",self.name, self.version, self.ip, self.port)
+	}
+}
+
+pub fn load_servers(servers: &mut Vec<Server>) -> Result<(), Box<dyn std::error::Error>> {
+	// Create runtime
+	let mut runtime = tokio::runtime::Builder::new()
+	    .basic_scheduler()
+	    .threaded_scheduler()
+	    .enable_all()
+	    .build()
+	    .unwrap();
+	// Spawn the runtime and run async fn
+	runtime
+	    .block_on(async_load_servers(servers))
+}
+
+async fn async_load_servers(servers: &mut Vec<Server>) -> Result<(), Box<dyn std::error::Error>> {
+    let request_url = format!("https://mb.srb2.org/MS/0/servers");
+    let timeout = Duration::new(5, 0);
+    let client = ClientBuilder::new().timeout(timeout).build().unwrap();
+    //println!("GET_response");
+    let mut resp = client.get(&request_url)
+    	.send()
+    	.await?
+    	.text()
+    	.await?;
+
+    let string = resp.to_string();
+    let mut words = string.split('\n');
+    let mut ip: std::string::String;
+    let mut port: std::string::String;
+    let mut name: std::string::String;
+    let mut version: std::string::String;
+
+    let mut listing: u8 = 1;
+    while let Some(word) = words.next() {
+    	// ignore room numbers
+    	if word.len() <= 2 {
+    		continue;
+    	}
+
+    	let mut server = word.split(' ');
+    	for sip in server.next() {
+    		ip = sip.to_string();
+    		port 	= server.next().or(Some("")).unwrap().to_string();
+    		name 	= server.next().or(Some("")).unwrap().to_string();
+    		version = server.next().or(Some("")).unwrap().to_string();
+    		server.next().or(Some("")).unwrap();
+    		server.next().or(Some("")).unwrap();
+    		servers.push(
+    			Server {
+	    			ip: ip,
+	    			port: port,
+	    			name: name,
+	    			version: version,
+	    			selection: listing
+    		});
+    	}
+    	listing += 1;
+    }
+    Ok(())
+}
+
 
 // TODO: Creation of structs for better manipulation/cleaner code
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,6 +101,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 	let mut application = std::string::String::from("srb2"); // TODO: read from file
 	// first time opening?
 	let mut firsttime = true; // TODO: read from file
+	// was list used?
+	let mut listused = false;
+	// have we joined any server yet?
+	let mut joined = false;
+	// Last joined server
+	let mut last = std::string::String::new();
 
 	// TODO: read args from list. read IP from `list` command
 	// assignments
@@ -32,14 +121,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 		.open(FILENAME)
 		.unwrap();
 
+	// Will contain all our servers
+	let mut servers: Vec<Server> = Vec::new();
+	// Get servers
+	load_servers(&mut servers);
+
 	// check if this is not the first time opening srb2l-r
 	// if list.contains_var then firsttime = false;
-
-	// Client to make multiple requests with
-	let client = reqwest::blocking::Client::new();
-
-	// Body for storing values into
-	let mut body: std::string::String; 
 	
 	// Input variable
 	let mut input: std::string::String = std::string::String::new();
@@ -47,14 +135,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 	// TODO: create option to allow immediately displaying servers upon startup?
 	println!("{}[2J", 27 as char);
 	println!("========================== SRB2 LAUNCHER-r =====================");
+
 	if firsttime {
 		println!("NOTICE: If this is your first time using SRB2 Launcher-r, type \"help\" without\n the quotation marks for more details. This message will not appear again.");
 		firsttime = false; // TODO: write variable in the .txt file to make program remember
-		
 	}
 
 	// start loop
 	'running: loop {
+		list_servers(&mut servers, &mut listused);
+		
 		// refresh user input and await for new input
 		input = std::string::String::new();
 		print!("launcher$: ");
@@ -62,22 +152,45 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 		std::io::stdin().read_line(&mut input).expect("Error getting input");
 		input.pop();
 
+		// If 'list' was typed
+		if listused {
+			for server in &servers {
+				if server.selection == input.parse::<u8>().unwrap() {
+					println!("Jumping into server...");
+					let ip = format!("{}:{}", server.ip, server.port);
+					last = ip.clone();
+					push_ip(&mut args, ip);
+					exec_srb2(&application, &mut args, &None);
+					pop_ip(&mut args);
+					// Reset listused variable
+					//listused = false;
+					// We have currently joined a server
+					joined = true;
+					// Clean the console and re-iterate
+					continue;
+				}
+			}
+		}
+
 		// match string whose trailing whitespace is truncated
 		match input.trim_end() {
 			"help" => {
-				println!("	help: 	     Show this message.");
-				println!("	update:      Update server list and display available servers,");
-				println!("			     	in realtime. (??)");
-				println!("	list: 	     Show available servers, and update lists file.");
-				println!("			     	If getting servers fails or there is no response,");
-				println!("			     	the available list file is used to display servers.");
-				println!("	connect: 	 Connect to a specified IP.");
-				println!(" 				 	i.e. \"connect 192.168.0.1\"");
-				println!("	run: 	     Run SRB2 with the current commandline arguments,");
-				println!("			     	without connecting to any server.");
-				println!("	version: 	 Show the current version of the application.");
-				println!("	options: 	 Display some options you can enable/disable to work");
-				println!(" 				 	i.e. every time the launcher starts, etc.");
+				println!("	help: 	     	Show this message.");
+				println!("	update:      	Update server list and display available servers,");
+				println!("			     		in realtime. (??)");
+				println!("	list: 	     	Show available servers, and update lists file.");
+				println!("			     		If getting servers fails or there is no response,");
+				println!("			     		the available list file is used to display servers.");
+				println!("  [number]: 		Join to specified server. command list must be ran");
+				println!("						beforehand in order for this to work!");
+				println!("  last: 			Join the last joined server.");
+				println!("	connect: 	 	Connect to a specified IP.");
+				println!(" 				 		i.e. \"connect 192.168.0.1\"");
+				println!("	run: 	    	 Run SRB2 with the current commandline arguments,");
+				println!("			     		without connecting to any server.");
+				println!("	version: 	 	Show the current version of the application.");
+				println!("	options: 	 	Display some options you can enable/disable to work");
+				println!(" 				 		i.e. every time the launcher starts, etc.");
 				println!("	exit | quit: Exit application");
 			},
 			"arg_test" => {
@@ -94,7 +207,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 				input.pop();*/
 				println!("Args: {:?}", args);
 			},
-			"print" => {
+			/*"print" => {
 				// save contents of body into list
 				// and then print the list
 				println!("Reading servers..");
@@ -116,34 +229,44 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 				//serv_list.read_to_string(&mut content).expect("Error reading list file");
 				println!("Contents: \n{}", content);
 
-			}
+			}*/
+			// TODO: filtering options
+			// List available servers
 			"list" => {
-				println!("{}[2J", 27 as char);
-				println!("================ AVAILABLE SERVERS....");
-				// let i = 1;
-				//for ip in list.txt
-				// println!("{}. {}",i,ip);
-				// i++
+				list_servers(&mut servers, &mut listused);
 			},
+			// Join last joined server
+			"last" => {
+				match joined {
+					true => {
+						push_ip(&mut args, last.clone());
+						exec_srb2(&application, &mut args, &None);
+						pop_ip(&mut args);
+					},
+					false => {
+						println!("ERROR: A server was not joined yet!");
+					}
+					_ => {},
+				};
+			}
 			"connect" => {
-				println!("{}[2J", 27 as char);
-				input = std::string::String::new();
-				println!("	WARNING: If you provide an invalid IP,");
-				println!("		you will not be connected to the given server!");
-				print!("Connecting to IPv4(:port) : ");
-				std::io::stdout().flush().unwrap();
-				std::io::stdin().read_line(&mut input).expect("Error getting input");
-				input.pop();
+					println!("{}[2J", 27 as char);
+					input = std::string::String::new();
+					println!("	WARNING: If you provide an invalid IP,");
+					println!("		you will not be connected to the given server!");
+					print!("Connecting to IPv4(:port) : ");
+					std::io::stdout().flush().unwrap();
+					std::io::stdin().read_line(&mut input).expect("Error getting input");
+					input.pop();
 
-				// call push_ip
-				push_ip(&mut args, input);
+					// call push_ip
+					push_ip(&mut args, input);
 
-				//ip = Some(editable);
-				exec_srb2(&application, &mut args, &ip);
-				// pop off "-connect" "[ip]" afterwards?
-    			pop_ip(&mut args);
-
-				//ip = Some(std::string::String::new());
+					//ip = Some(editable);
+					exec_srb2(&application, &mut args, &ip);
+					// pop off "-connect" "[ip]" afterwards?
+					pop_ip(&mut args);
+					//ip = Some(std::string::String::new());
 			}
 			"run" => {
 				println!("STARTING SRB2...");
@@ -236,6 +359,21 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+// TODO: filtering options?
+// i.e. "what to filter for? version? ping? 
+pub fn list_servers(servers: &mut Vec<Server>, listused: &mut bool) -> Result<(), Box<dyn std::error::Error>> {
+	println!("{}[2J", 27 as char);
+	println!("================ AVAILABLE SERVERS....");
+	for server in servers {
+		/*if server.version != "2.2.6".to_string() {
+			continue;
+		}*/
+		println!("{}. {}",server.selection, server);
+	}
+	*listused = true;
+	Ok(())
+}
+
 pub fn push_ip(
 	args: &mut Vec<std::string::String>, 
 	ip: std::string::String) { 
@@ -256,6 +394,12 @@ pub fn exec_srb2(
 	ip: &Option<std::string::String>,
 	) {
 
+	match ip {
+		Some(ip) => args.push(ip.to_string()),
+		None => {},
+		_ => {},
+	};
+
 	//let mut combination = std::string::String::new();
 	println!("DEBUG: {}{:?}", application, &args);
 
@@ -269,7 +413,14 @@ pub fn exec_srb2(
     std::io::stdout().write_all(&start.stdout).unwrap();
 	std::io::stderr().write_all(&start.stderr).unwrap();
     println!("status: {}", start.status);
-    println!(" Quit SRB2 succesfully..")
+    println!(" Quit SRB2 succesfully..");
+
+    // pop off ip
+    /*match ip {
+    	None => {},
+		Some(ip) => args.pop().unwrap(),
+		_ => {},
+	};*/
 /*
     println!("status: {}", start.status);
 	println!("stdout: {}", String::from_utf8_lossy(&start.stdout));
@@ -277,19 +428,59 @@ pub fn exec_srb2(
 	*/
 }
 
-pub fn update_list(client: &reqwest::blocking::Client) -> Result<std::string::String, ()> {
-	let body: std::string::String = client.get("https://mb.srb2.org/masterserver.php").send()
-		.unwrap()
-		.text()
-		.unwrap_or("".to_string());
 
-	/*if let Ok(resp) = client.get("https://mb.srb2.org/masterserver.php").send() {
-		let body = resp.text();
-		// body = get_ips(body);
-		//println!("body = {:?}", body);
-		println!("List updated");
-		return Some(body);
-	}*/
 
-	Ok(body)
-}
+
+// this MIGHT had been used to create servers... but masochism
+// left here for learning purposes
+/*
+
+	let mut document = Document::from_read(resp.as_bytes()).unwrap();
+
+	println!("GET_server_ids");
+    let mut sids = Vec::new();
+    for sid in document.find(Name("tr"))
+    {
+        match sid.attr("id") {
+            Some(attr) if !attr.starts_with("server_") => continue,
+            Some(attr) => sids.push(attr.to_string()),
+            None => continue,
+            _ => {},
+        };
+    }
+
+    println!("server_ids_to_XHR_urls");
+    // Convert server IDs into XHR urls
+    for i in 0..sids.len() {
+    	sids[i] = sids[i].replace("server_", "");
+    	sids[i] = format!("https://mb.srb2.org/ms_ajax.php?do=row&sid={}&alt=1", sids[i]);
+    }
+
+    println!("Getting server info via XHR urls..");
+    // Acquire server information using the XHR urls
+    let mut server_details: Vec<std::string::String> = Vec::new();
+    for sid in sids {
+   		resp = client.get(&sid)
+    		.send()
+    		.await?
+    		.text()
+    		.await?;
+    	
+    	document = Document::from_read(resp.as_bytes()).unwrap();
+    	for node in document.find(Text) {
+    		println!("{:?}", node);
+    		println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");	
+    	}
+    	/*
+    	let mut tds = document
+        	.find(Name("td"))
+        	.skip(5);
+        let ctf = tds.next().unwrap().text();
+        println!("{}", ctf);
+        let mut tds = tds.skip(1);
+        let num = tds.next().unwrap().text();
+        println!("{}", num);*/
+    	//servers.push(ctf,);
+    	//println!("{:?}", servers);
+    }
+*/

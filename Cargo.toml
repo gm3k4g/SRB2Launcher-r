@@ -5,6 +5,8 @@ authors = ["516M <thingstuffet@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-scraper = "0.12.0"
-reqwest = { version = "0.10", features = ["blocking", "json"] }
-crossterm = "0.17.7"
+futures = "*"
+tokio = { version = "0.2", features = ["full"] }
+reqwest = "*"
+serde = { version = "1.0.100", features = ["derive"] }
+serde_json = { version = "1.0", optional = true }

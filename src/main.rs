@@ -1,5 +1,4 @@
 // main -- error handling
-
 fn main() {
     match srb2launcher_r::run() {
     	Err(e) => {
@@ -10,3 +9,4 @@ fn main() {
     	},
     };
 }
+
